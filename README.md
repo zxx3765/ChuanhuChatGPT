@@ -1,7 +1,7 @@
 <h1 align="center">川虎 ChatGPT 🐯 Chuanhu ChatGPT</h1>
 <div align="center">
   <a href="https://github.com/GaiZhenBiao/ChuanhuChatGPT">
-    <img src="https://user-images.githubusercontent.com/51039745/222689546-7612df0e-e28b-4693-9f5f-4ef2be3daf48.png" alt="Logo" height="156">
+    <img src="https://user-images.githubusercontent.com/70903329/226267132-e5295925-f53a-4e9d-a221-6099583da98d.png" alt="Logo" height="156">
   </a>
 
   <p align="center">
@@ -22,15 +22,19 @@
       <a href="https://github.com/GaiZhenBiao/ChuanhuChatGPT/pulls">
         <img alt="GitHub pull requests" src="https://img.shields.io/github/issues-pr/GaiZhenBiao/ChuanhuChatGPT?color=0088ff" />
       </a>
-      <br/>
-      <em>实时回复 / 无限对话 / 保存对话记录 / 渲染公式代码 / 联网搜索 / 预设Prompt集 / 实时Tokens显示</em>
-      <br/>
+      <p>
+      	实时回复 / 无限对话 / 保存对话记录 / 预设Prompt集 / 联网搜索 / 根据文件回答
+      	<br/>
+      	渲染LaTex / 渲染表格 / 渲染代码 / 代码高亮 / 自定义api-URL / “小而美”的体验 / Ready for GPT-4
+      </p>
       <a href="https://www.bilibili.com/video/BV1mo4y1r7eE"><strong>视频教程</strong></a>
         ·
+      <a href="https://www.bilibili.com/video/BV1184y1w7aP"><strong>2.0介绍视频</strong></a>
+	·
       <a href="https://huggingface.co/spaces/JohnSmith9982/ChuanhuChatGPT"><strong>在线体验</strong></a>
     </p>
     <p align="center">
-      <img alt="Animation Demo" src="https://user-images.githubusercontent.com/51039745/223148794-f4fd2fcb-3e48-4cdf-a759-7aa463d3f14c.gif" />
+      <img alt="Animation Demo" src="https://user-images.githubusercontent.com/51039745/226255695-6b17ff1f-ea8d-464f-b69b-a7b6b68fffe8.gif" />
     </p>
   </p>
 </div>
@@ -63,6 +67,8 @@
 	```
 	或者，点击网页右上角的 `Download ZIP`，下载并解压完成后进入文件夹，进入`终端`或`命令提示符`。
 
+	如果你使用Windows，应该在文件夹里按住`shift`右键，选择“在终端中打开”。如果没有这个选项，选择“在此处打开Powershell窗口”。如果你使用macOS，可以在Finder底部的路径栏中右键当前文件夹，选择`服务-新建位于文件夹位置的终端标签页`。
+
 	<img width="200" alt="downloadZIP" src="https://user-images.githubusercontent.com/23137268/223696317-b89d2c71-c74d-4c6d-8060-a21406cfb8c8.png">
 
 2. **填写API密钥**
@@ -83,7 +89,7 @@
 	<details><summary>3. 在文件中设定默认密钥、用户名密码</summary>
 
 	这样设置的密钥可以在拉取项目更新之后保留。
-	
+
 	在项目文件夹中新建这两个文件：`api_key.txt` 和 `auth.json`。
 
 	在`api_key.txt`中填写你的API-Key，注意不要填写任何无关内容。
@@ -101,6 +107,8 @@
 
 3. **安装依赖**
 
+	在终端中输入下面的命令，然后回车。
+
 	```shell
 	pip install -r requirements.txt
 	```
@@ -116,6 +124,8 @@
 	如果下载慢，建议[配置清华源](https://mirrors.tuna.tsinghua.edu.cn/help/pypi/)，或者科学上网。
 
 4. **启动**
+
+	请使用下面的命令。
 
 	```shell
 	python ChuanhuChatbot.py
@@ -236,6 +246,49 @@ map $http_upgrade $connection_upgrade {
 
 为了同时配置域名访问和身份认证，需要配置SSL的证书，可以参考[这篇博客](https://www.gzblog.tech/2020/12/25/how-to-config-hexo/#%E9%85%8D%E7%BD%AEHTTPS)一键配置
 
+
+### 全程使用Docker 为ChuanhuChatGPT 开启HTTPS
+
+如果你的VPS 80端口与443端口没有被占用，则可以考虑如下的方法，只需要将你的域名提前绑定到你的VPS 的IP即可。此方法由[@iskoldt-X](https://github.com/iskoldt-X) 提供。
+
+首先，运行[nginx-proxy](https://github.com/nginx-proxy/nginx-proxy)
+
+```
+docker run --detach \
+    --name nginx-proxy \
+    --publish 80:80 \
+    --publish 443:443 \
+    --volume certs:/etc/nginx/certs \
+    --volume vhost:/etc/nginx/vhost.d \
+    --volume html:/usr/share/nginx/html \
+    --volume /var/run/docker.sock:/tmp/docker.sock:ro \
+    nginxproxy/nginx-proxy
+```
+接着，运行[acme-companion](https://github.com/nginx-proxy/acme-companion)，这是用来自动申请TLS 证书的容器
+
+```
+docker run --detach \
+    --name nginx-proxy-acme \
+    --volumes-from nginx-proxy \
+    --volume /var/run/docker.sock:/var/run/docker.sock:ro \
+    --volume acme:/etc/acme.sh \
+    --env "DEFAULT_EMAIL=你的邮箱（用于申请TLS 证书）" \
+    nginxproxy/acme-companion
+```
+
+最后，可以运行ChuanhuChatGPT
+```
+docker run -d --name chatgpt \
+	-e my_api_key="你的API" \
+	-e USERNAME="替换成用户名" \
+	-e PASSWORD="替换成密码" \
+	-v ~/chatGPThistory:/app/history \
+	-e VIRTUAL_HOST=你的域名 \
+	-e VIRTUAL_PORT=7860 \
+	-e LETSENCRYPT_HOST=你的域名 \
+	tuchuanhuhuhu/chuanhuchatgpt:latest
+```
+如此即可为ChuanhuChatGPT实现自动申请TLS证书并且开启HTTPS
 </details>
 
 ---
@@ -258,6 +311,46 @@ pip install gradio --upgrade --force-reinstall
 很多时候，这样就可以解决问题。
 
 ### 常见问题
+
+<details><summary>配置代理</summary>
+
+OpenAI不允许在不受支持的地区使用API，否则可能会导致账号被风控。下面给出代理配置示例：
+
+在Clash配置文件中，加入：
+
+```
+rule-providers:
+  private:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt"
+    path: ./ruleset/ads.yaml
+    interval: 86400
+
+rules:
+ - RULE-SET,private,DIRECT
+ - DOMAIN-SUFFIX,openai.com,你的代理规则
+```
+
+如果你使用 Surge，请在配置文件中加入：
+
+```
+[Rule]
+DOMAIN-SET,https://cdn.jsdelivr.net/gh/Loyalsoldier/surge-rules@release/private.txt,DIRECT
+DOMAIN-SUFFIX,openai.com,你的代理规则
+```
+注意，如果你本来已经有对应的字段，请将这些规则合并到已有字段中，否则代理软件会报错。
+
+</details>
+
+<details><summary><code>TypeError: Base.set () got an unexpected keyword argument</code></summary>
+
+这是因为川虎ChatGPT紧跟Gradio发展步伐，你的Gradio版本太旧了。请升级依赖：
+
+```
+pip install -r requirements.txt --upgrade
+```
+</details>
 
 <details><summary><code>No module named '_bz2'</code></summary>
 
@@ -311,31 +404,8 @@ pip install urllib3==1.25.11
 > requests.exceptions.SSLError: HTTPSConnectionPool(host='api.openai.com', port=443): Max retries exceeded with url: /v1/chat/completions (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:1129)')))
 > ```
 
-请将`openai.com`加入你使用的代理App的代理规则。注意不要将`127.0.0.1`加入代理，否则会有下一个错误。
+请参考配置代理部分，将`openai.com`加入你使用的代理App的代理规则。注意不要将`127.0.0.1`加入代理，否则会有下一个错误。
 
-例如，在Clash配置文件中，加入：
-
-```
-rule-providers:
-  private:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt"
-    path: ./ruleset/ads.yaml
-    interval: 86400
-
-rules:
- - RULE-SET,private,DIRECT
- - DOMAIN-SUFFIX,openai.com,你的代理规则
-```
-
-Surge：
-
-```
-[Rule]
-DOMAIN-SET,https://cdn.jsdelivr.net/gh/Loyalsoldier/surge-rules@release/private.txt,DIRECT
-DOMAIN-SUFFIX,openai.com,你的代理规则
-```
 </details>
 
 <details><summary><code>网页提示错误 Something went wrong</code></summary>
