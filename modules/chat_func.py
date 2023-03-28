@@ -14,9 +14,10 @@ from duckduckgo_search import ddg
 import asyncio
 import aiohttp
 
-from presets import *
-from llama_func import *
-from utils import *
+from modules.presets import *
+from modules.llama_func import *
+from modules.utils import *
+import modules.shared as shared
 
 # logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s")
 
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
 
 
 initial_prompt = "You are a helpful assistant."
-API_URL = "https://api.openai.com/v1/chat/completions"
 HISTORY_DIR = "history"
 TEMPLATES_DIR = "templates"
 
@@ -65,16 +65,18 @@ def get_response(
     # 如果存在代理设置，使用它们
     proxies = {}
     if http_proxy:
-        logging.info(f"Using HTTP proxy: {http_proxy}")
+        logging.info(f"使用 HTTP 代理: {http_proxy}")
         proxies["http"] = http_proxy
     if https_proxy:
-        logging.info(f"Using HTTPS proxy: {https_proxy}")
+        logging.info(f"使用 HTTPS 代理: {https_proxy}")
         proxies["https"] = https_proxy
 
-    # 如果有代理，使用代理发送请求，否则使用默认设置发送请求
+    # 如果有自定义的api-url，使用自定义url发送请求，否则使用默认设置发送请求
+    if shared.state.api_url != API_URL:
+        logging.info(f"使用自定义API URL: {shared.state.api_url}")
     if proxies:
         response = requests.post(
-            API_URL,
+            shared.state.api_url,
             headers=headers,
             json=payload,
             stream=True,
@@ -83,7 +85,7 @@ def get_response(
         )
     else:
         response = requests.post(
-            API_URL,
+            shared.state.api_url,
             headers=headers,
             json=payload,
             stream=True,
@@ -262,17 +264,21 @@ def predict(
     selected_model=MODELS[0],
     use_websearch=False,
     files = None,
+    reply_language="中文",
     should_check_token_count=True,
 ):  # repetition_penalty, top_k
     logging.info("输入为：" + colorama.Fore.BLUE + f"{inputs}" + colorama.Style.RESET_ALL)
+    yield chatbot+[(inputs, "")], history, "开始生成回答……", all_token_counts
+    if reply_language == "跟随问题语言（不稳定）":
+        reply_language = "the same language as the question, such as English, 中文, 日本語, Español, Français, or Deutsch."
     if files:
         msg = "构建索引中……（这可能需要比较久的时间）"
         logging.info(msg)
-        yield chatbot, history, msg, all_token_counts
+        yield chatbot+[(inputs, "")], history, msg, all_token_counts
         index = construct_index(openai_api_key, file_src=files)
         msg = "索引构建完成，获取回答中……"
-        yield chatbot, history, msg, all_token_counts
-        history, chatbot, status_text = chat_ai(openai_api_key, index, inputs, history, chatbot)
+        yield chatbot+[(inputs, "")], history, msg, all_token_counts
+        history, chatbot, status_text = chat_ai(openai_api_key, index, inputs, history, chatbot, reply_language)
         yield chatbot, history, status_text, all_token_counts
         return
 
@@ -292,6 +298,7 @@ def predict(
             replace_today(WEBSEARCH_PTOMPT_TEMPLATE)
             .replace("{query}", inputs)
             .replace("{web_results}", "\n\n".join(web_results))
+            .replace("{reply_language}", reply_language )
         )
     else:
         link_references = ""
@@ -306,10 +313,13 @@ def predict(
             all_token_counts.append(0)
         else:
             history[-2] = construct_user(inputs)
-        yield chatbot, history, status_text, all_token_counts
+        yield chatbot+[(inputs, "")], history, status_text, all_token_counts
         return
-
-    yield chatbot, history, "开始生成回答……", all_token_counts
+    elif len(inputs.strip()) == 0:
+        status_text = standard_error_msg + no_input_msg
+        logging.info(status_text)
+        yield chatbot+[(inputs, "")], history, status_text, all_token_counts
+        return
 
     if stream:
         logging.info("使用流式传输")
@@ -327,6 +337,9 @@ def predict(
             display_append=link_references
         )
         for chatbot, history, status_text, all_token_counts in iter:
+            if shared.state.interrupted:
+                shared.state.recover()
+                return
             yield chatbot, history, status_text, all_token_counts
     else:
         logging.info("不使用流式传输")
@@ -371,9 +384,8 @@ def predict(
             all_token_counts,
             top_p,
             temperature,
-            stream=False,
+            max_token//2,
             selected_model=selected_model,
-            hidden=True,
         )
         for chatbot, history, status_text, all_token_counts in iter:
             status_text = f"Token 达到上限，已自动降低Token计数至 {status_text}"
@@ -390,6 +402,7 @@ def retry(
     temperature,
     stream=False,
     selected_model=MODELS[0],
+    reply_language="中文",
 ):
     logging.info("重试中……")
     if len(history) == 0:
@@ -409,10 +422,12 @@ def retry(
         temperature,
         stream=stream,
         selected_model=selected_model,
+        reply_language=reply_language,
     )
-    logging.info("重试完毕")
+    logging.info("重试中……")
     for x in iter:
         yield x
+    logging.info("重试完毕")
 
 
 def reduce_token_size(
@@ -423,9 +438,9 @@ def reduce_token_size(
     token_count,
     top_p,
     temperature,
-    stream=False,
+    max_token_count,
     selected_model=MODELS[0],
-    hidden=False,
+    reply_language="中文",
 ):
     logging.info("开始减少token数量……")
     iter = predict(
@@ -437,17 +452,22 @@ def reduce_token_size(
         token_count,
         top_p,
         temperature,
-        stream=stream,
         selected_model=selected_model,
         should_check_token_count=False,
+        reply_language=reply_language,
     )
     logging.info(f"chatbot: {chatbot}")
+    flag = False
     for chatbot, history, status_text, previous_token_count in iter:
-        history = history[-2:]
-        token_count = previous_token_count[-1:]
-        if hidden:
-            chatbot.pop()
-        yield chatbot, history, construct_token_message(
-            sum(token_count), stream=stream
+        num_chat = find_n(previous_token_count, max_token_count)
+        if flag:
+            chatbot = chatbot[:-1]
+        flag = True
+        history = history[-2*num_chat:] if num_chat > 0 else []
+        token_count = previous_token_count[-num_chat:] if num_chat > 0 else []
+        msg = f"保留了最近{num_chat}轮对话"
+        yield chatbot, history, msg + "，" + construct_token_message(
+            sum(token_count) if len(token_count) > 0 else 0,
         ), token_count
+    logging.info(msg)
     logging.info("减少token数量完毕")
